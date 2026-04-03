@@ -1,0 +1,24 @@
+# Git
+.git
+.gitignore
+
+# Build output
+target/
+
+# IDE
+.idea
+*.iml
+.vscode
+
+# Logs
+*.log
+
+# Env
+.env
+
+# Runtime data
+uploads/
+
+# OS
+.DS_Store
+Thumbs.db
