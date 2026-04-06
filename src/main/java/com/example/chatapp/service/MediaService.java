@@ -1,21 +1,21 @@
 package com.example.chatapp.service;
 
-import com.example.chatapp.dto.*;
-import com.example.chatapp.entity.*;
-import com.example.chatapp.repository.*;
+import com.example.chatapp.dto.MediaResponse;
+import com.example.chatapp.entity.MediaFile;
+import com.example.chatapp.repository.MediaFileRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.io.InputStreamResource;
 import org.springframework.core.io.Resource;
-import org.springframework.core.io.UrlResource;
 import org.springframework.http.*;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
+import software.amazon.awssdk.services.s3.S3Client;
 
 import java.io.IOException;
-import java.net.MalformedURLException;
-import java.nio.file.*;
+import java.io.InputStream;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -24,43 +24,40 @@ import java.util.UUID;
 public class MediaService {
 
     private final MediaFileRepository mediaFileRepository;
-    private final UserRepository userRepository;
+    private final S3Client s3Client;
 
-    @Value("${app.media.upload-dir}")
-    private String uploadDir;
+    @Value("${app.s3.bucket}")
+    private String bucketName;
 
     public MediaResponse uploadMedia(MultipartFile file) {
         if (file.isEmpty()) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "The file is empty");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "File is empty");
         }
 
-        // We create a directory if it doesn't exist
-        Path uploadPath = Paths.get(uploadDir);
-        try {
-            Files.createDirectories(uploadPath);
-        } catch (IOException e) {
-            throw new ResponseStatusException(
-                    HttpStatus.INTERNAL_SERVER_ERROR, "Unable to create file directory");
-        }
-
-        // We generate a unique file name
         String originalFilename = StringUtils.cleanPath(
                 Objects.requireNonNull(file.getOriginalFilename()));
-        String storedFilename = UUID.randomUUID() + "_" + originalFilename;
-        Path targetPath = uploadPath.resolve(storedFilename);
 
-        try {
-            Files.copy(file.getInputStream(), targetPath,
-                    StandardCopyOption.REPLACE_EXISTING);
+        String key = UUID.randomUUID() + "_" + originalFilename;
+
+        try (InputStream inputStream = file.getInputStream()) {
+
+            s3Client.putObject(
+                    b -> b.bucket(bucketName)
+                          .key(key)
+                          .contentType(file.getContentType()),
+                    software.amazon.awssdk.core.sync.RequestBody.fromInputStream(
+                            inputStream, file.getSize())
+            );
+
         } catch (IOException e) {
             throw new ResponseStatusException(
-                    HttpStatus.INTERNAL_SERVER_ERROR, "File saving error");
+                    HttpStatus.INTERNAL_SERVER_ERROR, "S3 upload error");
         }
 
         MediaFile mediaFile = new MediaFile();
         mediaFile.setFilename(originalFilename);
         mediaFile.setContentType(file.getContentType());
-        mediaFile.setFilePath(targetPath.toString());
+        mediaFile.setFilePath(key);
 
         MediaFile saved = mediaFileRepository.save(mediaFile);
         return toDto(saved);
@@ -69,26 +66,28 @@ public class MediaService {
     public ResponseEntity<Resource> getMediaResource(Long id) {
         MediaFile mediaFile = mediaFileRepository.findById(id)
                 .orElseThrow(() -> new ResponseStatusException(
-                        HttpStatus.NOT_FOUND, "The file does not exist"));
+                        HttpStatus.NOT_FOUND, "File not found"));
 
-        Path filePath = Paths.get(mediaFile.getFilePath());
-        Resource resource;
         try {
-            resource = new UrlResource(filePath.toUri());
-            if (!resource.exists() || !resource.isReadable()) {
-                throw new ResponseStatusException(
-                        HttpStatus.NOT_FOUND, "The file does not exist on the disk");
-            }
-        } catch (MalformedURLException e) {
-            throw new ResponseStatusException(
-                    HttpStatus.INTERNAL_SERVER_ERROR, "Incorrect file path");
-        }
+            var s3Object = s3Client.getObject(
+                    b -> b.bucket(bucketName)
+                          .key(mediaFile.getFilePath())
+            );
 
-        return ResponseEntity.ok()
-                .contentType(MediaType.parseMediaType(mediaFile.getContentType()))
-                .header(HttpHeaders.CONTENT_DISPOSITION,
-                        "inline; filename=\"" + mediaFile.getFilename() + "\"")
-                .body(resource);
+            InputStream inputStream = s3Object;
+
+            Resource resource = new InputStreamResource(inputStream);
+
+            return ResponseEntity.ok()
+                    .contentType(MediaType.parseMediaType(mediaFile.getContentType()))
+                    .header(HttpHeaders.CONTENT_DISPOSITION,
+                            "inline; filename=\"" + mediaFile.getFilename() + "\"")
+                    .body(resource);
+
+        } catch (Exception e) {
+            throw new ResponseStatusException(
+                    HttpStatus.INTERNAL_SERVER_ERROR, "S3 read error");
+        }
     }
 
     public MediaResponse toDto(MediaFile mediaFile) {
