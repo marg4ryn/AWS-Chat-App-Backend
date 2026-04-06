@@ -14,6 +14,13 @@ import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
 import software.amazon.awssdk.services.s3.S3Client;
 
+import software.amazon.awssdk.services.s3.presigner.S3Presigner;
+import software.amazon.awssdk.services.s3.presigner.model.GetObjectPresignRequest;
+import software.amazon.awssdk.services.s3.presigner.model.PresignedGetObjectRequest;
+import software.amazon.awssdk.services.s3.model.GetObjectRequest;
+import java.time.Duration;
+import java.net.URI;
+
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.Objects;
@@ -25,6 +32,7 @@ public class MediaService {
 
     private final MediaFileRepository mediaFileRepository;
     private final S3Client s3Client;
+    private final S3Presigner presigner; 
 
     @Value("${app.s3.bucket}")
     private String bucketName;
@@ -63,30 +71,32 @@ public class MediaService {
         return toDto(saved);
     }
 
-    public ResponseEntity<Resource> getMediaResource(Long id) {
+    public ResponseEntity<String> getMediaUrl(Long id) {
         MediaFile mediaFile = mediaFileRepository.findById(id)
                 .orElseThrow(() -> new ResponseStatusException(
                         HttpStatus.NOT_FOUND, "File not found"));
 
         try {
-            var s3Object = s3Client.getObject(
-                    b -> b.bucket(bucketName)
-                          .key(mediaFile.getFilePath())
-            );
+            GetObjectRequest getObjectRequest = GetObjectRequest.builder()
+                    .bucket(bucketName)
+                    .key(mediaFile.getFilePath())
+                    .build();
 
-            InputStream inputStream = s3Object;
+            GetObjectPresignRequest presignRequest =
+                    GetObjectPresignRequest.builder()
+                            .signatureDuration(Duration.ofMinutes(30))
+                            .getObjectRequest(getObjectRequest)
+                            .build();
 
-            Resource resource = new InputStreamResource(inputStream);
+            String url = presigner.presignGetObject(presignRequest).url().toString();
 
-            return ResponseEntity.ok()
-                    .contentType(MediaType.parseMediaType(mediaFile.getContentType()))
-                    .header(HttpHeaders.CONTENT_DISPOSITION,
-                            "inline; filename=\"" + mediaFile.getFilename() + "\"")
-                    .body(resource);
+            return ResponseEntity.status(HttpStatus.FOUND)
+                .location(URI.create(url))
+                .build();
 
         } catch (Exception e) {
             throw new ResponseStatusException(
-                    HttpStatus.INTERNAL_SERVER_ERROR, "S3 read error");
+                    HttpStatus.INTERNAL_SERVER_ERROR, "Presign error");
         }
     }
 

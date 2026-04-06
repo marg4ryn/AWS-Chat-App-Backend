@@ -26,7 +26,7 @@ public class MediaController {
 
     // GET download media file by ID
     @GetMapping("/{id}")
-    public ResponseEntity<Resource> getMedia(@PathVariable Long id) {
-        return mediaService.getMediaResource(id);
+    public ResponseEntity<String> getMedia(@PathVariable Long id) {
+        return mediaService.getMediaUrl(id);
     }
 }
