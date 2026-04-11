@@ -16,7 +16,6 @@ import java.util.List;
 public class MessageService {
 
     private final MessageRepository messageRepository;
-    private final UserRepository userRepository;
     private final MediaFileRepository mediaFileRepository;
     private final MediaService mediaService;
 
@@ -29,19 +28,11 @@ public class MessageService {
     }
 
     @Transactional
-    public MessageResponse sendMessage(MessageRequest request) {
+    public MessageResponse sendMessage(MessageRequest request, User sender) {
         if (request.getContent() == null && request.getMediaId() == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                     "The message must contain content or an attachment");
         }
-
-        // Find or create a user
-        User sender = userRepository.findByUsername(request.getSenderUsername())
-                .orElseGet(() -> {
-                    User newUser = new User();
-                    newUser.setUsername(request.getSenderUsername());
-                    return userRepository.save(newUser);
-                });
 
         MediaFile media = null;
         if (request.getMediaId() != null) {

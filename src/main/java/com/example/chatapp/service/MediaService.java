@@ -2,27 +2,24 @@ package com.example.chatapp.service;
 
 import com.example.chatapp.dto.MediaResponse;
 import com.example.chatapp.entity.MediaFile;
+import com.example.chatapp.entity.User;
 import com.example.chatapp.repository.MediaFileRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.core.io.InputStreamResource;
-import org.springframework.core.io.Resource;
 import org.springframework.http.*;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
 import software.amazon.awssdk.services.s3.S3Client;
-
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 import software.amazon.awssdk.services.s3.presigner.model.GetObjectPresignRequest;
-import software.amazon.awssdk.services.s3.presigner.model.PresignedGetObjectRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
-import java.time.Duration;
-import java.net.URI;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.URI;
+import java.time.Duration;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -32,7 +29,7 @@ public class MediaService {
 
     private final MediaFileRepository mediaFileRepository;
     private final S3Client s3Client;
-    private final S3Presigner presigner; 
+    private final S3Presigner presigner;
 
     @Value("${app.s3.bucket}")
     private String bucketName;
@@ -44,11 +41,9 @@ public class MediaService {
 
         String originalFilename = StringUtils.cleanPath(
                 Objects.requireNonNull(file.getOriginalFilename()));
-
         String key = UUID.randomUUID() + "_" + originalFilename;
 
         try (InputStream inputStream = file.getInputStream()) {
-
             s3Client.putObject(
                     b -> b.bucket(bucketName)
                           .key(key)
@@ -56,7 +51,6 @@ public class MediaService {
                     software.amazon.awssdk.core.sync.RequestBody.fromInputStream(
                             inputStream, file.getSize())
             );
-
         } catch (IOException e) {
             throw new ResponseStatusException(
                     HttpStatus.INTERNAL_SERVER_ERROR, "S3 upload error");
@@ -82,17 +76,16 @@ public class MediaService {
                     .key(mediaFile.getFilePath())
                     .build();
 
-            GetObjectPresignRequest presignRequest =
-                    GetObjectPresignRequest.builder()
-                            .signatureDuration(Duration.ofMinutes(30))
-                            .getObjectRequest(getObjectRequest)
-                            .build();
+            GetObjectPresignRequest presignRequest = GetObjectPresignRequest.builder()
+                    .signatureDuration(Duration.ofMinutes(30))
+                    .getObjectRequest(getObjectRequest)
+                    .build();
 
             String url = presigner.presignGetObject(presignRequest).url().toString();
 
             return ResponseEntity.status(HttpStatus.FOUND)
-                .location(URI.create(url))
-                .build();
+                    .location(URI.create(url))
+                    .build();
 
         } catch (Exception e) {
             throw new ResponseStatusException(
